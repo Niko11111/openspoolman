@@ -500,8 +500,18 @@ def on_message(client, userdata, msg):
               log("      - Not found. Update spool tag!")
               tray["unmapped_bambu_tag"] = tray_uuid
               tray["issue"] = True
+              # Only the SpoolMan side is cleared. The AMS tray settings are
+              # left alone: a tag this app does not know yet is not a wrong
+              # assignment, and resetting the tray here fought the AMS while it
+              # was still identifying the spool it had just read. This branch runs
+              # on every report for such a tray, so the reset repeated until the
+              # tag was linked. See #95.
+              #
+              # It also brings the MQTT path in line with the web path, which
+              # resets the AMS tray only for a genuinely empty slot and only when
+              # CLEAR_ASSIGNMENT_WHEN_EMPTY is set - see _augment_tray() in app.py
+              # and the description of that setting in the README.
               clear_active_spool_for_tray(ams['id'], tray['id'])
-              clear_ams_tray_assignment(ams['id'], tray['id'])
           else:
             log(
                 f"    - [{num2letter(ams['id'])}{tray['id']}]")
