@@ -8,6 +8,7 @@ from collections import Counter
 from flask import Flask, request, render_template, redirect, url_for
 
 from config import (
+    RUNNING_SETTINGS,
     BASE_URL,
     AUTO_SPEND,
     SPOOLMAN_BASE_URL,
@@ -22,6 +23,7 @@ from messages import AMS_FILAMENT_SETTING
 import mqtt_bambulab
 import print_history as print_history_service
 import spoolman_client
+import settings_store
 import spoolman_service
 import test_data
 from spoolman_service import augmentTrayDataWithSpoolMan, trayUid, normalize_color_hex
@@ -61,6 +63,9 @@ def fronted_utilities():
     EXTERNAL_SPOOL_ID=EXTERNAL_SPOOL_ID,
     PRINTER_MODEL=printer_model,
     PRINTER_NAME=PRINTER_NAME,
+    # One cached stat per render. The settings page saves values that only
+    # take effect at the next start, so every page says so until it happens.
+    RESTART_REQUIRED=bool(settings_store.pending_changes(RUNNING_SETTINGS)),
   )
 
 
@@ -720,3 +725,7 @@ def print_select_spool():
 # Register REST API blueprint
 from api_routes import api_bp
 app.register_blueprint(api_bp)
+
+# Register the settings page
+from settings_routes import settings_bp
+app.register_blueprint(settings_bp)
