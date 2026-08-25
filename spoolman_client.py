@@ -5,6 +5,19 @@ from logger import append_to_rotating_file, log
 
 SPOOLMAN_LOG_FILE = "/home/app/logs/spoolman.log"
 
+# (connect, read). Without a timeout a SpoolMan that accepts the connection and
+# then goes quiet holds the caller forever: gunicorn runs with four threads and
+# the MQTT loop calls in here as well, so a single unreachable server could take
+# the whole app down with it.
+SPOOLMAN_TIMEOUT = (3.05, 10)
+
+# One session for connection reuse. Every call in this module talks to the same
+# host, and the spool list is fetched on nearly every request. No retries are
+# configured on it: a stale page beats a slow one, and PUT /spool/{id}/use is
+# not idempotent, so retrying a request that did reach SpoolMan would deduct
+# the filament twice.
+_SESSION = requests.Session()
+
 
 def _log_spoolman_change(action, spool_id=None, payload=None, status=None):
   parts = [action]
@@ -31,7 +44,7 @@ def patchExtraTags(spool_id, old_extras, new_extras):
   for key, value in new_extras.items():
     old_extras[key] = value
 
-  resp = requests.patch(f"{SPOOLMAN_API_URL}/spool/{spool_id}", json={
+  resp = _SESSION.patch(f"{SPOOLMAN_API_URL}/spool/{spool_id}", timeout=SPOOLMAN_TIMEOUT, json={
     "extra": old_extras
   })
   _log_spoolman_change(
@@ -45,7 +58,7 @@ def patchExtraTags(spool_id, old_extras, new_extras):
 
 
 def getSpoolById(spool_id):
-  response = requests.get(f"{SPOOLMAN_API_URL}/spool/{spool_id}")
+  response = _SESSION.get(f"{SPOOLMAN_API_URL}/spool/{spool_id}", timeout=SPOOLMAN_TIMEOUT)
   #print(response.status_code)
   #print(response.text)
   return response.json()
@@ -53,9 +66,9 @@ def getSpoolById(spool_id):
 
 def fetchSpoolList():
   if SPOOL_SORTING:
-    response = requests.get(f"{SPOOLMAN_API_URL}/spool?sort={SPOOL_SORTING}")
+    response = _SESSION.get(f"{SPOOLMAN_API_URL}/spool?sort={SPOOL_SORTING}", timeout=SPOOLMAN_TIMEOUT)
   else:
-    response = requests.get(f"{SPOOLMAN_API_URL}/spool")
+    response = _SESSION.get(f"{SPOOLMAN_API_URL}/spool", timeout=SPOOLMAN_TIMEOUT)
     
   #print(response.status_code)
   #print(response.text)
@@ -73,7 +86,7 @@ def consumeSpool(spool_id, use_weight=None, use_length=None):
 
   log(f'Consuming {payload} from spool {spool_id}')
 
-  response = requests.put(f"{SPOOLMAN_API_URL}/spool/{spool_id}/use", json=payload)
+  response = _SESSION.put(f"{SPOOLMAN_API_URL}/spool/{spool_id}/use", timeout=SPOOLMAN_TIMEOUT, json=payload)
   _log_spoolman_change(
     "consume_spool",
     spool_id=spool_id,
@@ -84,7 +97,7 @@ def consumeSpool(spool_id, use_weight=None, use_length=None):
   #print(response.text)
 
 def fetchSettings():
-  response = requests.get(f"{SPOOLMAN_API_URL}/setting/")
+  response = _SESSION.get(f"{SPOOLMAN_API_URL}/setting/", timeout=SPOOLMAN_TIMEOUT)
   #print(response.status_code)
   #print(response.text)
 
