@@ -232,6 +232,19 @@ Without NFC Tags:
 
 ### Accessing OpenSpoolMan
 Once the server is running (via `wsgi.py`, Gunicorn, Docker, or Helm), open `https://<host>:8443` if you used the built-in adhoc SSL mode, or `http://<host>:8001` when the service listens on the default port 8001. Replace `<host>` with your server's IP/DNS and ensure the port matches your chosen deployment (`PORT` env var or docker-compose mapping). For Docker deployments, you can also use `docker compose port openspoolman 8001` to see the mapped host port.
+### Settings page
+Printer name, serial number, access code and IP address, and the SpoolMan address, can be set under **Settings** in the menu instead of by editing `config.env` on the host. What you save there wins; every environment variable still applies wherever nothing has been saved for it, so an existing setup is untouched until you change something.
+
+The page works on an install with nothing configured yet - it is the one page that does not require a working printer connection, which is the point of it.
+
+**Saved settings take effect at the next start.** The MQTT connection is built at startup and is not rebuilt while the app runs, so a banner asks for a restart until you give it one.
+
+**Test connection** checks both sides without changing anything:
+ - the printer, by opening a TCP connection and then a short-lived MQTT session to see whether the access code is accepted, and by listening for a report under the serial number. It never publishes, so a running print does not notice. If this app is already connected with exactly these settings, no second connection is opened at all.
+ - SpoolMan, by asking for its version and whether it has the native tag relation.
+
+The access code is never sent back to the browser. Leave the field blank to keep the one that is stored; there is a separate checkbox to remove it. `data/settings.json` holds it, so the file is written `0600` - keep it out of backups and version control, and do not expose OpenSpoolMan to the internet.
+
 ### Native SpoolMan tags
 SpoolMan gained a tag relation in the release after 0.26.1: a spool can be linked to one or more tag UIDs, and any client can look a spool up by one. OpenSpoolMan uses it when the server has it, and keeps writing the old `extra.tag` field either way, so nothing changes for an older SpoolMan or for other tools that read that field.
 

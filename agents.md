@@ -79,6 +79,17 @@ Use `docker compose port openspoolman 8001` to see mapped host port if needed.
 ---
 
 ## 5) Configuration contract (environment variables)
+
+Every variable below still works exactly as it did. Five of them - `PRINTER_NAME`,
+`PRINTER_ID`, `PRINTER_ACCESS_CODE`, `PRINTER_IP` and `SPOOLMAN_BASE_URL` - can
+now also be saved from the settings page, in which case the saved value wins.
+Precedence is file > environment > built-in default, resolved once at import in
+`config.py`, so the `from config import X` style everywhere else is unchanged and
+a saved value takes effect at the next start. `settings_store.pending_changes()`
+compares the file against `config.RUNNING_SETTINGS` to know when a restart is
+still outstanding. Do not add a runtime reload without also rebuilding the MQTT
+connection, or the two will disagree.
+
 ### Required / core
 - `OPENSPOOLMAN_BASE_URL`
   - HTTPS URL where OpenSpoolMan is reachable

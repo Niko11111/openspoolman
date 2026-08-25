@@ -1,0 +1,127 @@
+{% extends 'base.html' %}
+{% block content %}
+
+{% if pending %}
+<div class="alert alert-warning" role="alert">
+  <i class="bi bi-arrow-clockwise"></i>
+  Saved, but not in use yet: <strong>{{ pending | join(', ') }}</strong>.
+  Restart OpenSpoolMan to apply them - for example
+  <code>docker compose restart openspoolman</code>.
+</div>
+{% endif %}
+
+<form method="post" action="{{ url_for('settings.settings_save') }}">
+  <div class="card mb-3">
+    <div class="card-body">
+      <h5 class="card-title"><i class="bi bi-printer"></i> Printer</h5>
+
+      <div class="mb-3">
+        <label for="PRINTER_NAME" class="form-label">Name</label>
+        <input type="text" class="form-control {% if errors.PRINTER_NAME %}is-invalid{% endif %}"
+               id="PRINTER_NAME" name="PRINTER_NAME" value="{{ values.PRINTER_NAME }}"
+               placeholder="X1 Carbon in the workshop">
+        {% if errors.PRINTER_NAME %}<div class="invalid-feedback">{{ errors.PRINTER_NAME }}</div>{% endif %}
+        <div class="form-text">Shown in the header. {{ sources.PRINTER_NAME | replace('unset', 'not set yet') }}</div>
+      </div>
+
+      <div class="mb-3">
+        <label for="PRINTER_ID" class="form-label">Serial number</label>
+        <input type="text" class="form-control {% if errors.PRINTER_ID %}is-invalid{% endif %}"
+               id="PRINTER_ID" name="PRINTER_ID" value="{{ values.PRINTER_ID }}"
+               autocapitalize="characters" spellcheck="false">
+        {% if errors.PRINTER_ID %}<div class="invalid-feedback">{{ errors.PRINTER_ID }}</div>{% endif %}
+        <div class="form-text">
+          From the printer's settings, or from <code>scripts/init_bambulab.py</code>.
+          Currently from: {{ sources.PRINTER_ID | replace('unset', 'nowhere') }}
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <label for="PRINTER_IP" class="form-label">IP address</label>
+        <input type="text" class="form-control {% if errors.PRINTER_IP %}is-invalid{% endif %}"
+               id="PRINTER_IP" name="PRINTER_IP" value="{{ values.PRINTER_IP }}"
+               placeholder="192.168.1.50" spellcheck="false">
+        {% if errors.PRINTER_IP %}<div class="invalid-feedback">{{ errors.PRINTER_IP }}</div>{% endif %}
+        <div class="form-text">
+          The printer must be in LAN mode. Currently from:
+          {{ sources.PRINTER_IP | replace('unset', 'nowhere') }}
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <label for="PRINTER_ACCESS_CODE" class="form-label">Access code</label>
+        <input type="password" class="form-control" id="PRINTER_ACCESS_CODE"
+               name="PRINTER_ACCESS_CODE" value="" autocomplete="new-password"
+               placeholder="{% if access_code_set %}unchanged{% else %}not set{% endif %}">
+        <div class="form-text">
+          {% if access_code_set %}
+            One is stored ({{ sources.PRINTER_ACCESS_CODE }}). Leave this blank to keep it.
+          {% else %}
+            From the printer's network settings.
+          {% endif %}
+        </div>
+        {% if access_code_set %}
+        <div class="form-check mt-2">
+          <input class="form-check-input" type="checkbox" value="1"
+                 id="clear_printer_access_code" name="clear_printer_access_code">
+          <label class="form-check-label" for="clear_printer_access_code">
+            Remove the saved access code
+          </label>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-body">
+      <h5 class="card-title"><i class="bi bi-box-seam"></i> SpoolMan</h5>
+      <div class="mb-3">
+        <label for="SPOOLMAN_BASE_URL" class="form-label">Address</label>
+        <input type="text" class="form-control {% if errors.SPOOLMAN_BASE_URL %}is-invalid{% endif %}"
+               id="SPOOLMAN_BASE_URL" name="SPOOLMAN_BASE_URL"
+               value="{{ values.SPOOLMAN_BASE_URL }}"
+               placeholder="http://192.168.1.10:7912" spellcheck="false">
+        {% if errors.SPOOLMAN_BASE_URL %}<div class="invalid-feedback">{{ errors.SPOOLMAN_BASE_URL }}</div>{% endif %}
+        <div class="form-text">
+          Without <code>/api/v1</code> and without a trailing slash - a slash is
+          removed for you. Currently from:
+          {{ sources.SPOOLMAN_BASE_URL | replace('unset', 'nowhere') }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mb-3">
+    <button type="submit" name="action" value="save" class="btn btn-primary">
+      <i class="bi bi-save"></i> Save
+    </button>
+    <button type="submit" name="action" value="test" class="btn btn-secondary">
+      <i class="bi bi-plug"></i> Test connection
+    </button>
+  </div>
+  <p class="form-text">
+    Saving writes <code>data/settings.json</code> and takes effect at the next start.
+    Testing changes nothing. The printer test opens a second, short-lived
+    connection unless this app is already connected with exactly these settings.
+  </p>
+</form>
+
+{% if probes %}
+<div class="card mb-3">
+  <div class="card-body">
+    <h5 class="card-title"><i class="bi bi-clipboard-check"></i> Connection test</h5>
+    {% for probe in probes %}
+    <div class="alert {% if probe.status == 'ok' %}alert-success
+                      {%- elif probe.status == 'warn' %}alert-warning
+                      {%- elif probe.status == 'fail' %}alert-danger
+                      {%- else %}alert-secondary{% endif %} mb-2" role="alert">
+      <strong>{{ probe.message }}</strong>
+      {% if probe.detail %}<div class="form-text">{{ probe.detail }}</div>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}

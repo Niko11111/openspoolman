@@ -43,6 +43,7 @@
         {% if NATIVE_TAGS %}
         <li><a href="{{ url_for('migrate_tags') }}" class="nav-link px-2 link-body-emphasis">Migrate Tags</a></li>
         {% endif %}
+        <li><a href="{{ url_for('settings.settings_page') }}" class="nav-link px-2 link-body-emphasis">Settings</a></li>
         <li><a href="{{ SPOOLMAN_BASE_URL }}" target="_blank" class="nav-link px-2 link-body-emphasis">SpoolMan</a></li>
       </ul>
     </div>
@@ -119,6 +120,13 @@
 });
   </script>
 <main class="container">
+  {% if RESTART_REQUIRED and request.endpoint != 'settings.settings_page' %}
+  <div class="alert alert-warning alert-dismissible fade show" role="alert">
+    Settings were saved that are not in use yet.
+    <a href="{{ url_for('settings.settings_page') }}" class="alert-link">Restart to apply them.</a>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+  </div>
+  {% endif %}
   {% if success_message %}
   <div class="alert alert-success alert-dismissible fade show" role="alert">
     <strong>Success!</strong> {{ success_message }}
