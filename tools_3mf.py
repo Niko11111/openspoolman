@@ -58,10 +58,16 @@ def get_filament_order(file):
 
     return filament_order
 
+# (connect, read). Generous on the read because this is a file download, but
+# not absent: this runs on the MQTT thread, and a cloud host that accepts the
+# connection and then stalls would stop the printer being listened to at all.
+CLOUD_DOWNLOAD_TIMEOUT = (3.05, 60)
+
+
 def download3mfFromCloud(url, destFile):
   log("Downloading 3MF file from cloud...")
   # Download the file and save it to the temporary file
-  response = requests.get(url)
+  response = requests.get(url, timeout=CLOUD_DOWNLOAD_TIMEOUT)
   response.raise_for_status()
   destFile.write(response.content)
 
