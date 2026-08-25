@@ -18,7 +18,9 @@ from config import (
     CLEAR_ASSIGNMENT_WHEN_EMPTY,
 )
 from messages import GET_VERSION, PUSH_ALL, AMS_FILAMENT_SETTING
-from spoolman_service import spendFilaments, setActiveTray, fetchSpools, clear_active_spool_for_tray
+from spoolman_service import (spendFilaments, setActiveTray, fetchSpools,
+                              clear_active_spool_for_tray, build_tag_index,
+                              find_spool_by_tag, EMPTY_TRAY_UUID)
 from tools_3mf import getMetaDataFrom3mf
 import time
 import copy
@@ -465,6 +467,10 @@ def on_message(client, userdata, msg):
     # Save ams spool data
     if "print" in data and "ams" in data["print"] and "ams" in data["print"]["ams"]:
       LAST_AMS_CONFIG["ams"] = data["print"]["ams"]["ams"]
+      # Built once per report. SpoolMan always serialises spool["tags"], so
+      # the list that is fetched anyway carries every native tag with it and
+      # this costs no extra request.
+      tag_index = build_tag_index(fetchSpools(True))
       for ams in data["print"]["ams"]["ams"]:
         log(f"AMS [{num2letter(ams['id'])}] (hum: {ams['humidity']}, temp: {ams['temp']}ºC)")
         for tray in ams["tray"]:
@@ -472,21 +478,15 @@ def on_message(client, userdata, msg):
             log(
                 f"    - [{num2letter(ams['id'])}{tray['id']}] {tray['tray_sub_brands']} {tray['tray_color']} ({str(tray['remain']).zfill(3)}%) [[ {tray['tray_uuid']} ]]")
 
-            found = False
-            tray_uuid = "00000000000000000000000000000000"
+            # One dictionary lookup instead of a scan of the whole inventory
+            # per tray. It finds the spool whether the tag was linked through
+            # SpoolMan's tag relation or written to the legacy extra.tag field,
+            # and it no longer depends on the two spellings matching exactly.
+            tray_uuid = tray.get("tray_uuid") or EMPTY_TRAY_UUID
+            spool = find_spool_by_tag(tag_index, tray_uuid)
+            found = spool is not None
 
-            for spool in fetchSpools(True):
-
-              tray_uuid = tray["tray_uuid"]
-
-              if not spool.get("extra", {}).get("tag"):
-                continue
-              tag = json.loads(spool["extra"]["tag"])
-              if tag != tray["tray_uuid"]:
-                continue
-
-              found = True
-
+            if found:
               setActiveTray(spool['id'], spool["extra"], ams['id'], tray["id"])
 
               # TODO: filament remaining - Doesn't work for AMS Lite

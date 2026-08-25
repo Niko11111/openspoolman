@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="card mb-3">
+  <div class="card-body">
+    <h5 class="card-title">
+      <i class="bi bi-exclamation-triangle"></i> This tag is already in use
+    </h5>
+
+    {% if conflict_spool_id %}
+    <p class="card-text">
+      SpoolMan has this tag on
+      <a href="{{ url_for('spool_info', spool_id=conflict_spool_id) }}">spool {{ conflict_spool_id }}</a>.
+      A tag identifies exactly one spool, so it has to be taken off that one
+      before it can go on spool {{ spool_id }}.
+    </p>
+    {% else %}
+    <p class="card-text">
+      SpoolMan has this tag on another spool and did not say which. Moving it
+      here will take it off whichever spool holds it.
+    </p>
+    {% endif %}
+
+    <p class="card-text"><small class="text-body-secondary">Tag: <code>{{ tag }}</code></small></p>
+
+    <a href="{{ move_url }}" class="btn btn-primary">
+      <i class="bi bi-arrow-left-right"></i> Move it to spool {{ spool_id }}
+    </a>
+    <a href="{{ url_for('home') }}" class="btn btn-secondary">Cancel</a>
+  </div>
+</div>
+{% endblock %}

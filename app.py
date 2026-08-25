@@ -24,7 +24,9 @@ import print_history as print_history_service
 import spoolman_client
 import spoolman_service
 import test_data
-from spoolman_service import augmentTrayDataWithSpoolMan, trayUid, normalize_color_hex
+from spoolman_service import (augmentTrayDataWithSpoolMan, trayUid, normalize_color_hex,
+                              build_tag_index, find_spool_by_tag,
+                              spool_tag_values, spool_has_tag)
 from logger import log
 
 _TEST_PATCH_CONTEXT = None
@@ -56,6 +58,10 @@ def fronted_utilities():
     AUTO_SPEND=AUTO_SPEND,
     AMS_MODELS_BY_ID=ams_models_by_id,
     color_is_dark=color_is_dark,
+    spool_has_tag=spool_has_tag,
+    # Cached for five minutes inside hasTagApi(), so this is not a probe
+    # per page render.
+    NATIVE_TAGS=spoolman_client.hasTagApi(),
     BASE_URL=BASE_URL,
     EXTERNAL_SPOOL_AMS_ID=EXTERNAL_SPOOL_AMS_ID,
     EXTERNAL_SPOOL_ID=EXTERNAL_SPOOL_ID,
@@ -118,6 +124,54 @@ def _select_spool_color_hex(spool_data):
     candidate = filament.get("color_hex") or ""
 
   return normalize_color_hex(candidate)
+
+# What a tag written by this app is called in SpoolMan's tag relation. The
+# field is free text and informational; the name says which convention the
+# value follows, so another reader can tell a Bambu tray uuid from the uuid4
+# this app writes into an NDEF url.
+TAG_FORMAT_BAMBU = "bambu"
+TAG_FORMAT_OPENSPOOL = "openspool"
+
+
+def link_tag_natively(spool_id, uid, tag_format):
+  """Link a tag through SpoolMan's relation, if this SpoolMan has one.
+
+  Returns (ok, conflicting_spool_id). A 409 is the only failure worth stopping
+  for: the tag belongs to another spool and only a human can say whether it
+  should be moved. Everything else is logged and waved through, because the
+  legacy extra.tag write still happens and must not start failing just because
+  the relation is unavailable.
+  """
+  if not spoolman_client.hasTagApi():
+    return True, None
+
+  status, conflict = spoolman_client.linkTag(spool_id, uid, tag_format)
+
+  if status == 409:
+    return False, conflict
+
+  if status is None or status >= 400:
+    log(f"Linking tag {uid} to spool {spool_id} answered {status}; extra.tag still written")
+
+  return True, None
+
+
+def move_tag_natively(uid, from_spool_id, to_spool_id, tag_format):
+  """Take a tag off one spool and put it on another."""
+  spoolman_client.unlinkTag(from_spool_id, uid)
+
+  # The old spool may also still name the tag on its legacy field, where it
+  # would contradict the relation. Clear it, but only if it is this tag.
+  try:
+    old_spool = spoolman_client.getSpoolById(from_spool_id)
+    old_extras = old_spool.get("extra") or {}
+    if spoolman_service.legacy_tag_value(old_spool) == uid:
+      spoolman_client.patchExtraTags(from_spool_id, old_extras, {"tag": json.dumps("")})
+  except Exception:
+    log(f"Could not clear extra.tag on spool {from_spool_id} while moving tag {uid}")
+
+  return link_tag_natively(to_spool_id, uid, tag_format)
+
 
 @app.route("/issue")
 def issue():
@@ -237,6 +291,23 @@ def assign_bambu_spool():
     spool_data = spoolman_client.getSpoolById(spool_id)
     extras = spool_data.get("extra") or {}
 
+    if request.args.get("move"):
+      ok, conflict = move_tag_natively(bambu_tag, request.args.get("move"),
+                                       spool_id, TAG_FORMAT_BAMBU)
+    else:
+      ok, conflict = link_tag_natively(spool_id, bambu_tag, TAG_FORMAT_BAMBU)
+
+    if not ok:
+      # SpoolMan knows this tag on another spool. Offer to move it rather than
+      # writing extra.tag anyway and leaving the two disagreeing.
+      return render_template(
+          'tag_conflict.html',
+          tag=bambu_tag,
+          spool_id=spool_id,
+          conflict_spool_id=conflict,
+          move_url=url_for('assign_bambu_spool', ams=ams_id, tray=tray_id,
+                           tag=bambu_tag, spool_id=spool_id, move=conflict))
+
     spoolman_client.patchExtraTags(spool_id, extras, {
       "tag": json.dumps(bambu_tag),
     })
@@ -307,7 +378,9 @@ def spool_info():
     if not tag_id and not spool_id:
       return render_template('error.html', exception="TAG ID or spool_id is required as a query parameter (e.g., ?tag_id=RFID123 or ?spool_id=1)")
 
-    spools = mqtt_bambulab.fetchSpools()
+    # spool_list was already fetched above; asking again would be a second
+    # full GET /spool for the same page.
+    spools = spool_list
     current_spool = None
 
     spool_id_int = None
@@ -317,27 +390,20 @@ def spool_info():
       except ValueError:
         return render_template('error.html', exception="Invalid spool_id provided")
 
-    for spool in spools:
-      if spool_id_int is not None and spool['id'] == spool_id_int:
-        current_spool = spool
-        if not tag_id:
-          tag_value = spool.get("extra", {}).get("tag")
-          if tag_value:
-            tag_id = json.loads(tag_value)
-        break
+    if spool_id_int is not None:
+      # An explicit id wins. The loop this replaced walked the list checking
+      # both conditions per spool, so with an id *and* a tag it could return
+      # whichever happened to come first.
+      current_spool = next((spool for spool in spools if spool['id'] == spool_id_int), None)
+      if current_spool and not tag_id:
+        # Whatever this spool is known by, so the page can offer it back.
+        identities = spool_tag_values(current_spool)
+        tag_id = identities[0] if identities else None
 
-      if not tag_id:
-        continue
-
-      if not spool.get("extra", {}).get("tag"):
-        continue
-
-      tag = json.loads(spool["extra"]["tag"])
-      if tag != tag_id:
-        continue
-
-      current_spool = spool
-      break
+    if current_spool is None and tag_id:
+      # Matches a native tag as well as the legacy extra.tag value, and no
+      # longer needs the two spellings to be identical.
+      current_spool = find_spool_by_tag(build_tag_index(spools), tag_id)
 
     if current_spool:
       ams_labels = build_ams_labels(ams_data)
@@ -464,16 +530,14 @@ def home():
     return render_template('error.html', exception=str(e))
 
 def sort_spools(spools):
-  def condition(item):
-    # Ensure the item has an "extra" key and is a dictionary
-    if not isinstance(item, dict) or "extra" not in item or not isinstance(item["extra"], dict):
-      return False
-
-    # Check the specified condition
-    return item["extra"].get("tag") or item["extra"].get("tag") == ""
-
-  # Sort with the custom condition: False values come first
-  return sorted(spools, key=lambda spool: bool(condition(spool)))
+  # Spools nothing identifies yet come first, because this list exists to
+  # assign them. A native tag counts, and so does the legacy extra.tag value.
+  #
+  # This used to key off the extra.tag *field* rather than its content, so a
+  # spool whose tag had been cleared - stored as an empty string - still
+  # sorted as if it were tagged, and sank to the bottom of the very list you
+  # would go to in order to give it one.
+  return sorted(spools, key=lambda spool: bool(spool_has_tag(spool)) if isinstance(spool, dict) else False)
 
 
 def extract_materials(spools):
@@ -527,13 +591,108 @@ def write_tag():
 
     myuuid = str(uuid.uuid4())
 
-    spoolman_client.patchExtraTags(spool_id, {}, {
+    # A fresh uuid4 cannot already belong to another spool, so there is no
+    # conflict to handle here.
+    link_tag_natively(spool_id, myuuid, TAG_FORMAT_OPENSPOOL)
+
+    # Read the spool first. Passing {} here sent the whole extra block as just
+    # the tag, which wiped active_tray and every other extra field the spool
+    # had.
+    spool_data = spoolman_client.getSpoolById(spool_id)
+    extras = spool_data.get("extra") or {}
+
+    spoolman_client.patchExtraTags(spool_id, extras, {
       "tag": json.dumps(myuuid),
     })
     return render_template('write_tag.html', myuuid=myuuid)
   except Exception as e:
     traceback.print_exc()
     return render_template('error.html', exception=str(e))
+
+def plan_tag_migration(spools):
+  """What linking every legacy extra.tag into the relation would do.
+
+  Pure, so the page can show it before anything is written.
+  """
+  rows = []
+
+  for spool in spools:
+    value = spoolman_service.legacy_tag_value(spool)
+    if not value or value == spoolman_service.EMPTY_TRAY_UUID:
+      continue
+
+    normalized = spoolman_service.normalize_uid(value)
+    native = {spoolman_service.normalize_uid(tag.get("uid"))
+              for tag in (spool.get("tags") or []) if isinstance(tag, dict)}
+
+    if normalized is None:
+      state = "invalid"
+    elif normalized in native:
+      state = "linked"
+    else:
+      state = "ready"
+
+    rows.append({
+        "spool_id": spool.get("id"),
+        "name": (spool.get("filament") or {}).get("name") or spool.get("name") or "",
+        "value": value,
+        "state": state,
+    })
+
+  return sorted(rows, key=lambda row: (row["state"] != "ready", row["spool_id"]))
+
+
+def run_tag_migration(rows):
+  """Link every row that is ready, and record what SpoolMan answered."""
+  for row in rows:
+    if row["state"] != "ready":
+      continue
+
+    # No format is set. After the fact there is no way to tell a Bambu tray
+    # uuid from a uuid4 this app wrote, and a guessed label is worse than
+    # none. Tags linked from now on carry the right one.
+    status, conflict = spoolman_client.linkTag(row["spool_id"], row["value"])
+
+    if status == 201:
+      row["state"] = "created"
+    elif status == 409:
+      row["state"] = "conflict"
+      row["conflict_spool_id"] = conflict
+    elif status == 400:
+      row["state"] = "invalid"
+    else:
+      row["state"] = "failed"
+      row["status"] = status
+
+  return rows
+
+
+@app.route("/migrate_tags")
+def migrate_tags():
+  """Move the tags on extra.tag into SpoolMan's own relation.
+
+  Shows what it would do first. Running it twice is harmless: linking a tag to
+  the spool that already holds it changes nothing.
+  """
+  if not spoolman_client.hasTagApi():
+    return render_template('error.html',
+                           exception="This SpoolMan has no tag relation yet, so there is nothing to migrate into.")
+
+  try:
+    rows = plan_tag_migration(spoolman_service.fetchSpools())
+    executed = False
+
+    if request.args.get("run"):
+      if READ_ONLY_MODE:
+        return render_template('error.html', exception="Live read-only mode: migrating tags is disabled.")
+      rows = run_tag_migration(rows)
+      executed = True
+
+    return render_template('migrate_tags.html', rows=rows, executed=executed)
+  except Exception as e:
+    traceback.print_exc()
+    return render_template('error.html', exception=str(e))
+
 
 @app.route('/health', methods=['GET'])
 def health():

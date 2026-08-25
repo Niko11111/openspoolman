@@ -135,6 +135,14 @@ Add these extra fields in SpoolMan:
 
 (Exact choice values are defined in the README; keep behavior compatible with existing installations.)
 
+`spool.tag` is still written and still read, but it is no longer the only place
+a tag lives. Since the release after SpoolMan 0.26.1 the same value is also put
+into SpoolMan's own tag relation (`POST /spool/{id}/tag`, looked up with
+`GET /spool?tag=`), which is what other readers can see. Support is detected by
+probing `GET /api/v1/tag/reader` and never by version number: the version
+endpoint still reports `0.26.1` on a build that has the feature. Anything other
+than 200 or 404 from that probe is inconclusive and must not be cached.
+
 ### Windows note (Bambu Studio)
 Filament IDs can be sourced from Bambu Studio’s filament base directory (see README). Do not hardcode user paths; keep it documentation-only.
 

@@ -1,4 +1,5 @@
 import requests
+import time
 from config import SPOOLMAN_API_URL, SPOOL_SORTING
 import json
 from logger import append_to_rotating_file, log
@@ -117,3 +118,114 @@ def fetchSettings():
   settings["currency"] = currency.replace('"', '')
 
   return settings
+
+
+# --- Native tag relation -----------------------------------------------------
+# SpoolMan grew a tag relation in the release after 0.26.1: a spool can be
+# linked to one or more tag UIDs, and any client can look a spool up by one.
+# Until then the only way to bind a tag to a spool was a convention on a free
+# text extra field, which no two tools spelled the same way.
+
+# How long a settled answer from hasTagApi() is trusted.
+_TAG_API_TTL_SECONDS = 300
+_tag_api = {"known": None, "checked_at": 0.0}
+
+
+def hasTagApi():
+  """Whether this SpoolMan supports the native tag relation.
+
+  Deliberately a capability probe and not a version check. GET /api/v1/info
+  still reports 0.26.1 on a build that has the feature, so a client keying off
+  the version number would never enable it. GET /tag/reader takes no
+  parameters, changes nothing, and answers 200 or 404.
+
+  Anything other than 200 or 404 - a timeout, a proxy in a bad mood, a 502 -
+  is inconclusive and is never cached. Caching it as a no would switch the
+  native path off for the rest of the process over one bad second.
+  """
+  now = time.monotonic()
+  known = _tag_api["known"]
+  if known is not None and now - _tag_api["checked_at"] < _TAG_API_TTL_SECONDS:
+    return known
+
+  try:
+    status = _SESSION.get(f"{SPOOLMAN_API_URL}/tag/reader", timeout=SPOOLMAN_TIMEOUT).status_code
+  except requests.RequestException as exc:
+    log(f"Native tag probe failed ({exc}); keeping the previous answer")
+    return bool(known)
+
+  if status in (200, 404):
+    _tag_api["known"] = status == 200
+    _tag_api["checked_at"] = now
+    return _tag_api["known"]
+
+  log(f"Native tag probe inconclusive (HTTP {status}); not caching")
+  return bool(known)
+
+
+def findSpoolByTag(uid):
+  """The spool a tag UID is linked to, or None.
+
+  SpoolMan normalizes the UID itself - separators are stripped and case does
+  not matter - so whatever spelling the reader used can be passed straight in.
+  """
+  try:
+    response = _SESSION.get(f"{SPOOLMAN_API_URL}/spool", params={"tag": uid},
+                            timeout=SPOOLMAN_TIMEOUT)
+  except requests.RequestException as exc:
+    log(f"Tag lookup for {uid} failed: {exc}")
+    return None
+
+  if response.status_code != 200:
+    log(f"Tag lookup for {uid} answered HTTP {response.status_code}")
+    return None
+
+  spools = response.json()
+  return spools[0] if spools else None
+
+
+def linkTag(spool_id, uid, tag_format=None):
+  """Link a tag UID to a spool.
+
+  Returns (status_code, conflicting_spool_id). SpoolMan answers 409 when the
+  tag already belongs to a different spool and puts that spool's id in the
+  body, which is what lets the UI offer to move it instead of just failing.
+  Linking a tag to the spool that already holds it is a 201 and changes
+  nothing. A status of None means the request never got through.
+  """
+  payload = {"uid": uid}
+  if tag_format:
+    payload["format"] = tag_format
+
+  try:
+    response = _SESSION.post(f"{SPOOLMAN_API_URL}/spool/{spool_id}/tag",
+                             json=payload, timeout=SPOOLMAN_TIMEOUT)
+  except requests.RequestException as exc:
+    log(f"Linking tag {uid} to spool {spool_id} failed: {exc}")
+    return None, None
+
+  _log_spoolman_change("link_tag", spool_id=spool_id, payload=payload,
+                       status=response.status_code)
+
+  conflict = None
+  if response.status_code == 409:
+    try:
+      conflict = response.json().get("spool_id")
+    except ValueError:
+      conflict = None
+
+  return response.status_code, conflict
+
+
+def unlinkTag(spool_id, uid):
+  """Remove a tag UID from a spool. 204 on success, 404 if it was not there."""
+  try:
+    response = _SESSION.delete(f"{SPOOLMAN_API_URL}/spool/{spool_id}/tag/{uid}",
+                               timeout=SPOOLMAN_TIMEOUT)
+  except requests.RequestException as exc:
+    log(f"Unlinking tag {uid} from spool {spool_id} failed: {exc}")
+    return None
+
+  _log_spoolman_change("unlink_tag", spool_id=spool_id, payload={"uid": uid},
+                       status=response.status_code)
+  return response.status_code

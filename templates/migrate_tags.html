@@ -1,0 +1,82 @@
+{% extends 'base.html' %}
+{% block content %}
+
+{% set ready = rows | selectattr("state", "equalto", "ready") | list %}
+{% set created = rows | selectattr("state", "equalto", "created") | list %}
+{% set conflicts = rows | selectattr("state", "equalto", "conflict") | list %}
+
+<div class="card mb-3">
+  <div class="card-body">
+    <h5 class="card-title"><i class="bi bi-tags"></i> Migrate tags into SpoolMan</h5>
+
+    <p class="card-text">
+      Tags used to live on the <code>extra.tag</code> field, a convention of this
+      app that other tools cannot read reliably. SpoolMan now has a tag relation
+      of its own. This copies what is on <code>extra.tag</code> into it.
+      Nothing is removed: <code>extra.tag</code> keeps its value.
+    </p>
+
+    {% if executed %}
+      <p class="card-text">
+        <strong>{{ created | length }}</strong> linked,
+        <strong>{{ conflicts | length }}</strong> in conflict,
+        out of {{ rows | length }} spools with a tag.
+      </p>
+    {% elif ready %}
+      <p class="card-text">
+        <strong>{{ ready | length }}</strong> of {{ rows | length }} would be linked.
+        Running this twice is harmless - linking a tag to the spool that already
+        holds it changes nothing.
+      </p>
+      <a href="{{ url_for('migrate_tags', run=1) }}" class="btn btn-primary">
+        <i class="bi bi-play-fill"></i> Migrate {{ ready | length }} tags
+      </a>
+    {% else %}
+      <p class="card-text">Nothing left to migrate.</p>
+    {% endif %}
+  </div>
+</div>
+
+{% if rows %}
+<div class="table-responsive">
+  <table class="table table-sm align-middle">
+    <thead>
+      <tr><th>Spool</th><th>Filament</th><th>Tag</th><th>Result</th></tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td><a href="{{ url_for('spool_info', spool_id=row.spool_id) }}">{{ row.spool_id }}</a></td>
+        <td>{{ row.name }}</td>
+        <td><code>{{ row.value }}</code></td>
+        <td>
+          {% if row.state == "ready" %}
+            <span class="badge bg-primary rounded-pill">will be linked</span>
+          {% elif row.state == "created" %}
+            <span class="badge bg-success rounded-pill">linked</span>
+          {% elif row.state == "linked" %}
+            <span class="badge bg-secondary rounded-pill">already linked</span>
+          {% elif row.state == "conflict" %}
+            <span class="badge bg-warning text-dark rounded-pill">
+              {% if row.conflict_spool_id %}
+                already on spool
+                <a href="{{ url_for('spool_info', spool_id=row.conflict_spool_id) }}"
+                   class="link-dark">{{ row.conflict_spool_id }}</a>
+              {% else %}
+                already on another spool
+              {% endif %}
+            </span>
+          {% elif row.state == "invalid" %}
+            <span class="badge bg-danger rounded-pill">not a usable tag id</span>
+          {% else %}
+            <span class="badge bg-danger rounded-pill">failed{% if row.status %} ({{ row.status }}){% endif %}</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% endblock %}

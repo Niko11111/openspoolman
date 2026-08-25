@@ -64,6 +64,124 @@ currency_symbols = {
 def get_currency_symbol(code):
     return currency_symbols.get(code, code)
 
+# A tray with no Bambu tag, and any third-party spool, reports this. Looking it
+# up would hang every empty chamber on whichever spool happened to carry it.
+EMPTY_TRAY_UUID = "0" * 32
+
+# Same rule SpoolMan applies before it stores or matches a tag UID.
+_UID_SEPARATORS = re.compile(r"[\s:_.\-]+")
+_UID_MAX_LENGTH = 64
+
+
+def normalize_uid(value):
+  """A tag UID in SpoolMan's canonical spelling, or None if it is not one.
+
+  Separators are dropped, an 0x prefix is dropped, the rest is uppercased and
+  has to be hexadecimal. Mirroring the server's rule is the point: 04:a2:b3,
+  04-A2-B3 and 04a2b3 are one tag, and a value this returns None for is one
+  SpoolMan would refuse, so the two never disagree about what a tag is.
+  """
+  if not value:
+    return None
+
+  text = _UID_SEPARATORS.sub("", str(value).strip())
+  if text[:2] in ("0x", "0X"):
+    text = text[2:]
+
+  if not text or len(text) > _UID_MAX_LENGTH:
+    return None
+
+  text = text.upper()
+  if any(character not in "0123456789ABCDEF" for character in text):
+    return None
+
+  return text
+
+
+def legacy_tag_value(spool):
+  """The tag stored on extra.tag, or None. The value is JSON encoded."""
+  raw = (spool.get("extra") or {}).get("tag")
+  if not raw:
+    return None
+
+  try:
+    value = json.loads(raw)
+  except (TypeError, ValueError):
+    value = raw
+
+  return value if isinstance(value, str) and value else None
+
+
+def spool_tag_values(spool):
+  """Every identity this spool can be recognised by, native ones first.
+
+  A spool may carry several native tags - a Bambu spool has a chip on each
+  flange, and its tray uuid is a third identity that both chips agree on.
+  """
+  values = [tag.get("uid") for tag in (spool.get("tags") or []) if isinstance(tag, dict) and tag.get("uid")]
+  legacy = legacy_tag_value(spool)
+  if legacy and legacy not in values:
+    values.append(legacy)
+  return values
+
+
+def spool_has_tag(spool):
+  """Whether anything identifies this spool, natively or on extra.tag."""
+  return bool(spool_tag_values(spool))
+
+
+def _index_keys(value):
+  """Both spellings a value should be findable under.
+
+  The normalized one is what a native tag and a Bambu tray uuid agree on. The
+  raw one keeps anything that was matched by exact string comparison before
+  working exactly as it did, even where it is not hexadecimal at all.
+  """
+  keys = []
+  normalized = normalize_uid(value)
+  if normalized and normalized != EMPTY_TRAY_UUID:
+    keys.append(normalized)
+  if value and value != EMPTY_TRAY_UUID and value not in keys:
+    keys.append(value)
+  return keys
+
+
+def build_tag_index(spools):
+  """Map every tag identity to its spool, native entries winning.
+
+  Built once from the spool list that is fetched anyway. SpoolMan always
+  serialises spool["tags"], so this costs no extra request, and it replaces a
+  scan of the whole inventory per tray with one dictionary lookup.
+  """
+  index = {}
+
+  # Legacy first, so a native tag can take a key over from it.
+  for spool in spools:
+    for key in _index_keys(legacy_tag_value(spool)):
+      index.setdefault(key, spool)
+
+  for spool in spools:
+    for tag in spool.get("tags") or []:
+      if not isinstance(tag, dict):
+        continue
+      for key in _index_keys(tag.get("uid")):
+        index[key] = spool
+
+  return index
+
+
+def find_spool_by_tag(index, value):
+  """The spool a scanned value belongs to, or None."""
+  if not value or value == EMPTY_TRAY_UUID:
+    return None
+
+  normalized = normalize_uid(value)
+  if normalized and normalized in index:
+    return index[normalized]
+
+  return index.get(value)
+
+
 def trayUid(ams_id, tray_id):
   return f"{PRINTER_ID}_{ams_id}_{tray_id}"
 
