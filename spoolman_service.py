@@ -30,7 +30,6 @@ def clear_active_spool_for_tray(ams_id: int, tray_id: int) -> None:
     if extras.get("active_tray") == target:
       spoolman_client.patchExtraTags(spool["id"], extras, {"active_tray": json.dumps("")})
       spool.setdefault("extra", {})["active_tray"] = json.dumps("")
-      break
 
 currency_symbols = {
     "AED": "د.إ", "AFN": "؋", "ALL": "Lek", "AMD": "դր.", "ANG": "ƒ", "AOA": "Kz", 
@@ -433,17 +432,29 @@ def setActiveTray(spool_id, spool_extra, ams_id, tray_id):
   if spool_extra is None:
     spool_extra = {}
 
-  if not spool_extra.get("active_tray") or json.loads(spool_extra.get("active_tray")) != trayUid(ams_id, tray_id):
-    spoolman_client.patchExtraTags(spool_id, spool_extra, {
-      "active_tray": json.dumps(trayUid(ams_id, tray_id)),
-    })
+  target = json.dumps(trayUid(ams_id, tray_id))
+  already_claimed = spool_extra.get("active_tray") == target
 
-    # Remove active tray from inactive spools
-    for old_spool in fetchSpools(cached=False):
-      if int(spool_id) != old_spool["id"] and old_spool.get("extra") and old_spool["extra"].get("active_tray") and json.loads(old_spool["extra"]["active_tray"]) == trayUid(ams_id, tray_id):
-        spoolman_client.patchExtraTags(old_spool["id"], old_spool["extra"], {"active_tray": json.dumps("")})
+  if not already_claimed:
+    spoolman_client.patchExtraTags(spool_id, spool_extra, {
+      "active_tray": target,
+    })
   else:
     log("Skipping set active tray")
+
+  # Remove active tray from inactive spools. This runs even when the spool
+  # above already claimed the tray: two spools claiming one tray is exactly
+  # the state that makes the wrong one show up on it, and returning early
+  # here is what let that state survive.
+  # Only the branch that just wrote needs fresh data. The other one reads the
+  # cache, so the MQTT thread does not fetch the whole spool list for every
+  # matched tray on every AMS report.
+  for old_spool in fetchSpools(cached=already_claimed):
+    if int(spool_id) == old_spool["id"]:
+      continue
+    old_extras = old_spool.get("extra") or {}
+    if old_extras.get("active_tray") == target:
+      spoolman_client.patchExtraTags(old_spool["id"], old_extras, {"active_tray": json.dumps("")})
 
 # Fetch spools from spoolman
 def fetchSpools(cached=False):
