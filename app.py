@@ -24,7 +24,9 @@ import print_history as print_history_service
 import spoolman_client
 import spoolman_service
 import test_data
-from spoolman_service import augmentTrayDataWithSpoolMan, trayUid, normalize_color_hex
+from spoolman_service import (augmentTrayDataWithSpoolMan, trayUid, normalize_color_hex,
+                              build_tag_index, find_spool_by_tag,
+                              spool_tag_values, spool_has_tag)
 from logger import log
 
 _TEST_PATCH_CONTEXT = None
@@ -56,6 +58,7 @@ def fronted_utilities():
     AUTO_SPEND=AUTO_SPEND,
     AMS_MODELS_BY_ID=ams_models_by_id,
     color_is_dark=color_is_dark,
+    spool_has_tag=spool_has_tag,
     BASE_URL=BASE_URL,
     EXTERNAL_SPOOL_AMS_ID=EXTERNAL_SPOOL_AMS_ID,
     EXTERNAL_SPOOL_ID=EXTERNAL_SPOOL_ID,
@@ -307,7 +310,9 @@ def spool_info():
     if not tag_id and not spool_id:
       return render_template('error.html', exception="TAG ID or spool_id is required as a query parameter (e.g., ?tag_id=RFID123 or ?spool_id=1)")
 
-    spools = mqtt_bambulab.fetchSpools()
+    # spool_list was already fetched above; asking again would be a second
+    # full GET /spool for the same page.
+    spools = spool_list
     current_spool = None
 
     spool_id_int = None
@@ -317,27 +322,20 @@ def spool_info():
       except ValueError:
         return render_template('error.html', exception="Invalid spool_id provided")
 
-    for spool in spools:
-      if spool_id_int is not None and spool['id'] == spool_id_int:
-        current_spool = spool
-        if not tag_id:
-          tag_value = spool.get("extra", {}).get("tag")
-          if tag_value:
-            tag_id = json.loads(tag_value)
-        break
+    if spool_id_int is not None:
+      # An explicit id wins. The loop this replaced walked the list checking
+      # both conditions per spool, so with an id *and* a tag it could return
+      # whichever happened to come first.
+      current_spool = next((spool for spool in spools if spool['id'] == spool_id_int), None)
+      if current_spool and not tag_id:
+        # Whatever this spool is known by, so the page can offer it back.
+        identities = spool_tag_values(current_spool)
+        tag_id = identities[0] if identities else None
 
-      if not tag_id:
-        continue
-
-      if not spool.get("extra", {}).get("tag"):
-        continue
-
-      tag = json.loads(spool["extra"]["tag"])
-      if tag != tag_id:
-        continue
-
-      current_spool = spool
-      break
+    if current_spool is None and tag_id:
+      # Matches a native tag as well as the legacy extra.tag value, and no
+      # longer needs the two spellings to be identical.
+      current_spool = find_spool_by_tag(build_tag_index(spools), tag_id)
 
     if current_spool:
       ams_labels = build_ams_labels(ams_data)
@@ -464,16 +462,14 @@ def home():
     return render_template('error.html', exception=str(e))
 
 def sort_spools(spools):
-  def condition(item):
-    # Ensure the item has an "extra" key and is a dictionary
-    if not isinstance(item, dict) or "extra" not in item or not isinstance(item["extra"], dict):
-      return False
-
-    # Check the specified condition
-    return item["extra"].get("tag") or item["extra"].get("tag") == ""
-
-  # Sort with the custom condition: False values come first
-  return sorted(spools, key=lambda spool: bool(condition(spool)))
+  # Spools nothing identifies yet come first, because this list exists to
+  # assign them. A native tag counts, and so does the legacy extra.tag value.
+  #
+  # This used to key off the extra.tag *field* rather than its content, so a
+  # spool whose tag had been cleared - stored as an empty string - still
+  # sorted as if it were tagged, and sank to the bottom of the very list you
+  # would go to in order to give it one.
+  return sorted(spools, key=lambda spool: bool(spool_has_tag(spool)) if isinstance(spool, dict) else False)
 
 
 def extract_materials(spools):

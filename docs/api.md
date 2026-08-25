@@ -60,6 +60,7 @@ Liste aller Spulen aus Spoolman.
       "weight_g": 1000,
       "remaining_g": 750,
       "tag": "RFID1234",
+      "tags": ["RFID1234"],
       "location": "Rack 1 / Bin 3"
     }
   ]

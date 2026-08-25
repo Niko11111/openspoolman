@@ -68,7 +68,12 @@ def _serialize_spool(spool: Dict[str, Any]) -> Dict[str, Any]:
       "diameter_mm": filament.get("diameter"),
       "weight_g": spool.get("initial_weight") or filament.get("weight"),
       "remaining_g": spool.get("remaining_weight"),
+      # "tag" stays what it always was, the legacy extra.tag value, so
+      # existing consumers keep working. "tags" is every identity the spool
+      # can be found by, which is the only one that is right once tags live
+      # in SpoolMan's own relation.
       "tag": tag,
+      "tags": spoolman_service.spool_tag_values(spool),
       "location": spool.get("location"),
       "ams_id": assigned_ams_id,
       "tray_index": assigned_tray_index,
