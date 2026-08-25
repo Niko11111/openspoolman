@@ -126,6 +126,12 @@ SpoolMan can print QR-code stickers for every spool; follow the SpoolMan label g
    source .venv/bin/activate
    pip install -r requirements.txt
    ```
+   **Python 3.12 or newer is required.** `tools_3mf.py` opens the downloaded
+   3MF with `tempfile.NamedTemporaryFile(delete_on_close=False, ...)`, and that
+   argument was added in 3.12. On an older interpreter the download raises, the
+   error is swallowed, and every cloud print is silently recorded with no
+   metadata - no thumbnail, no filament usage. The Docker image ships 3.12 and
+   CI runs 3.13, so this only bites a local install.
 3. Configure the environment variables (see below).
 4. Run the server with:
    ```bash
