@@ -56,6 +56,10 @@ Key folders/files you will interact with:
    - `python wsgi.py`
 
 Notes:
+- **Requires Python 3.12 or newer** (`tempfile.NamedTemporaryFile(delete_on_close=...)`
+  in `tools_3mf.py`). The Docker image uses 3.12, CI uses 3.13. On an older
+  interpreter the 3MF download fails and the error is swallowed, so prints are
+  recorded without metadata instead of failing loudly.
 - Default listen port is `8001` (to avoid clashing with SpoolMan).
 - Depending on SSL mode and mapping you may also access `https://<host>:8443`.
 
