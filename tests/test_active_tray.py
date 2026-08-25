@@ -1,8 +1,25 @@
+import importlib.util
 import json
 
 import pytest
 
-import spoolman_service as svc
+
+def _pristine(name):
+  """The module as it is on disk, with nothing patched into it.
+
+  Importing app applies test_data's patches to the shared modules for the rest
+  of the process, and spoolman_service.setActiveTray is one of them. pytest
+  imports every test module before it runs any of them, so whether this file
+  gets the real function or the seeded stub would otherwise depend on
+  collection order - which is not something a regression test should rest on.
+  """
+  spec = importlib.util.find_spec(name)
+  module = importlib.util.module_from_spec(spec)
+  spec.loader.exec_module(module)
+  return module
+
+
+svc = _pristine("spoolman_service")
 
 
 def _spool(spool_id, active_tray=None):
