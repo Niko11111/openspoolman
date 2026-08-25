@@ -218,6 +218,16 @@ Without NFC Tags:
 
 ### Accessing OpenSpoolMan
 Once the server is running (via `wsgi.py`, Gunicorn, Docker, or Helm), open `https://<host>:8443` if you used the built-in adhoc SSL mode, or `http://<host>:8001` when the service listens on the default port 8001. Replace `<host>` with your server's IP/DNS and ensure the port matches your chosen deployment (`PORT` env var or docker-compose mapping). For Docker deployments, you can also use `docker compose port openspoolman 8001` to see the mapped host port.
+### Native SpoolMan tags
+SpoolMan gained a tag relation in the release after 0.26.1: a spool can be linked to one or more tag UIDs, and any client can look a spool up by one. OpenSpoolMan uses it when the server has it, and keeps writing the old `extra.tag` field either way, so nothing changes for an older SpoolMan or for other tools that read that field.
+
+There is no version switch to set. The version endpoint still reports `0.26.1` on a build that has the feature, so OpenSpoolMan probes `GET /api/v1/tag/reader` instead and uses the relation when it answers.
+
+What changes when your SpoolMan supports it:
+ - A spool assigned by another reader - a handheld, a scale, an ESPHome box - is recognised here without anyone editing `extra.tag`.
+ - Linking a tag that already belongs to a different spool now says so, names that spool, and offers to move the tag, instead of quietly writing a second claim on it.
+ - A **Migrate Tags** entry appears in the menu. It copies the tags on `extra.tag` into the relation, shows what it would do before it does anything, and can be run twice without harm. Nothing is removed: `extra.tag` keeps its value.
+
 ### AUTO SPEND - Automatic filament usage based on slicer estimate
 You can turn this feature on to automatically update the spool usage in SpoolMan. 
 This feature is using slicer information about predicted filament weight usage (and in future correlating it with the progress of the printer to compute the estimate of filament used).

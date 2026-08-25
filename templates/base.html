@@ -40,6 +40,9 @@
         <li><a href="{{ url_for('home') }}" class="nav-link px-2 link-body-emphasis">Home</a></li>
         <li><a href="{{ url_for('assign_tag') }}" class="nav-link px-2 link-body-emphasis">Assign NFC Tag</a></li>
         <li><a href="{{ url_for('print_history') }}" class="nav-link px-2 link-body-emphasis">Print History</a></li>
+        {% if NATIVE_TAGS %}
+        <li><a href="{{ url_for('migrate_tags') }}" class="nav-link px-2 link-body-emphasis">Migrate Tags</a></li>
+        {% endif %}
         <li><a href="{{ SPOOLMAN_BASE_URL }}" target="_blank" class="nav-link px-2 link-body-emphasis">SpoolMan</a></li>
       </ul>
     </div>

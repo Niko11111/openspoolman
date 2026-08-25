@@ -59,6 +59,9 @@ def fronted_utilities():
     AMS_MODELS_BY_ID=ams_models_by_id,
     color_is_dark=color_is_dark,
     spool_has_tag=spool_has_tag,
+    # Cached for five minutes inside hasTagApi(), so this is not a probe
+    # per page render.
+    NATIVE_TAGS=spoolman_client.hasTagApi(),
     BASE_URL=BASE_URL,
     EXTERNAL_SPOOL_AMS_ID=EXTERNAL_SPOOL_AMS_ID,
     EXTERNAL_SPOOL_ID=EXTERNAL_SPOOL_ID,
@@ -605,6 +608,91 @@ def write_tag():
   except Exception as e:
     traceback.print_exc()
     return render_template('error.html', exception=str(e))
+
+def plan_tag_migration(spools):
+  """What linking every legacy extra.tag into the relation would do.
+
+  Pure, so the page can show it before anything is written.
+  """
+  rows = []
+
+  for spool in spools:
+    value = spoolman_service.legacy_tag_value(spool)
+    if not value or value == spoolman_service.EMPTY_TRAY_UUID:
+      continue
+
+    normalized = spoolman_service.normalize_uid(value)
+    native = {spoolman_service.normalize_uid(tag.get("uid"))
+              for tag in (spool.get("tags") or []) if isinstance(tag, dict)}
+
+    if normalized is None:
+      state = "invalid"
+    elif normalized in native:
+      state = "linked"
+    else:
+      state = "ready"
+
+    rows.append({
+        "spool_id": spool.get("id"),
+        "name": (spool.get("filament") or {}).get("name") or spool.get("name") or "",
+        "value": value,
+        "state": state,
+    })
+
+  return sorted(rows, key=lambda row: (row["state"] != "ready", row["spool_id"]))
+
+
+def run_tag_migration(rows):
+  """Link every row that is ready, and record what SpoolMan answered."""
+  for row in rows:
+    if row["state"] != "ready":
+      continue
+
+    # No format is set. After the fact there is no way to tell a Bambu tray
+    # uuid from a uuid4 this app wrote, and a guessed label is worse than
+    # none. Tags linked from now on carry the right one.
+    status, conflict = spoolman_client.linkTag(row["spool_id"], row["value"])
+
+    if status == 201:
+      row["state"] = "created"
+    elif status == 409:
+      row["state"] = "conflict"
+      row["conflict_spool_id"] = conflict
+    elif status == 400:
+      row["state"] = "invalid"
+    else:
+      row["state"] = "failed"
+      row["status"] = status
+
+  return rows
+
+
+@app.route("/migrate_tags")
+def migrate_tags():
+  """Move the tags on extra.tag into SpoolMan's own relation.
+
+  Shows what it would do first. Running it twice is harmless: linking a tag to
+  the spool that already holds it changes nothing.
+  """
+  if not spoolman_client.hasTagApi():
+    return render_template('error.html',
+                           exception="This SpoolMan has no tag relation yet, so there is nothing to migrate into.")
+
+  try:
+    rows = plan_tag_migration(spoolman_service.fetchSpools())
+    executed = False
+
+    if request.args.get("run"):
+      if READ_ONLY_MODE:
+        return render_template('error.html', exception="Live read-only mode: migrating tags is disabled.")
+      rows = run_tag_migration(rows)
+      executed = True
+
+    return render_template('migrate_tags.html', rows=rows, executed=executed)
+  except Exception as e:
+    traceback.print_exc()
+    return render_template('error.html', exception=str(e))
+
 
 @app.route('/health', methods=['GET'])
 def health():
