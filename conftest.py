@@ -1,7 +1,15 @@
-import pytest
+import os
 
-import test_data
-import socket
+# Before anything imports config, which reads the settings file at import time.
+# Without this a developer with a real data/settings.json would run the suite
+# against their own printer serial while CI, on a clean checkout, stayed green.
+# An empty value means "read no file".
+os.environ.setdefault("OPENSPOOLMAN_SETTINGS_FILE", "")
+
+import pytest  # noqa: E402
+
+import test_data  # noqa: E402
+import socket  # noqa: E402
 
 
 @pytest.fixture
