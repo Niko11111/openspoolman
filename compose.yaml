@@ -4,3 +4,9 @@ services:
     env_file: "config.env"
     ports:
       - "8000:8000"
+    volumes:
+      # Print history and saved settings live here. Without this they are
+      # inside the container and go away the next time it is recreated.
+      - ./data:/home/app/data
+      - ./logs:/home/app/logs
+      - ./prints:/home/app/static/prints
