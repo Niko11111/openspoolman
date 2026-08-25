@@ -122,6 +122,54 @@ def _select_spool_color_hex(spool_data):
 
   return normalize_color_hex(candidate)
 
+# What a tag written by this app is called in SpoolMan's tag relation. The
+# field is free text and informational; the name says which convention the
+# value follows, so another reader can tell a Bambu tray uuid from the uuid4
+# this app writes into an NDEF url.
+TAG_FORMAT_BAMBU = "bambu"
+TAG_FORMAT_OPENSPOOL = "openspool"
+
+
+def link_tag_natively(spool_id, uid, tag_format):
+  """Link a tag through SpoolMan's relation, if this SpoolMan has one.
+
+  Returns (ok, conflicting_spool_id). A 409 is the only failure worth stopping
+  for: the tag belongs to another spool and only a human can say whether it
+  should be moved. Everything else is logged and waved through, because the
+  legacy extra.tag write still happens and must not start failing just because
+  the relation is unavailable.
+  """
+  if not spoolman_client.hasTagApi():
+    return True, None
+
+  status, conflict = spoolman_client.linkTag(spool_id, uid, tag_format)
+
+  if status == 409:
+    return False, conflict
+
+  if status is None or status >= 400:
+    log(f"Linking tag {uid} to spool {spool_id} answered {status}; extra.tag still written")
+
+  return True, None
+
+
+def move_tag_natively(uid, from_spool_id, to_spool_id, tag_format):
+  """Take a tag off one spool and put it on another."""
+  spoolman_client.unlinkTag(from_spool_id, uid)
+
+  # The old spool may also still name the tag on its legacy field, where it
+  # would contradict the relation. Clear it, but only if it is this tag.
+  try:
+    old_spool = spoolman_client.getSpoolById(from_spool_id)
+    old_extras = old_spool.get("extra") or {}
+    if spoolman_service.legacy_tag_value(old_spool) == uid:
+      spoolman_client.patchExtraTags(from_spool_id, old_extras, {"tag": json.dumps("")})
+  except Exception:
+    log(f"Could not clear extra.tag on spool {from_spool_id} while moving tag {uid}")
+
+  return link_tag_natively(to_spool_id, uid, tag_format)
+
+
 @app.route("/issue")
 def issue():
   if not mqtt_bambulab.isMqttClientConnected():
@@ -239,6 +287,23 @@ def assign_bambu_spool():
 
     spool_data = spoolman_client.getSpoolById(spool_id)
     extras = spool_data.get("extra") or {}
+
+    if request.args.get("move"):
+      ok, conflict = move_tag_natively(bambu_tag, request.args.get("move"),
+                                       spool_id, TAG_FORMAT_BAMBU)
+    else:
+      ok, conflict = link_tag_natively(spool_id, bambu_tag, TAG_FORMAT_BAMBU)
+
+    if not ok:
+      # SpoolMan knows this tag on another spool. Offer to move it rather than
+      # writing extra.tag anyway and leaving the two disagreeing.
+      return render_template(
+          'tag_conflict.html',
+          tag=bambu_tag,
+          spool_id=spool_id,
+          conflict_spool_id=conflict,
+          move_url=url_for('assign_bambu_spool', ams=ams_id, tray=tray_id,
+                           tag=bambu_tag, spool_id=spool_id, move=conflict))
 
     spoolman_client.patchExtraTags(spool_id, extras, {
       "tag": json.dumps(bambu_tag),
@@ -523,7 +588,17 @@ def write_tag():
 
     myuuid = str(uuid.uuid4())
 
-    spoolman_client.patchExtraTags(spool_id, {}, {
+    # A fresh uuid4 cannot already belong to another spool, so there is no
+    # conflict to handle here.
+    link_tag_natively(spool_id, myuuid, TAG_FORMAT_OPENSPOOL)
+
+    # Read the spool first. Passing {} here sent the whole extra block as just
+    # the tag, which wiped active_tray and every other extra field the spool
+    # had.
+    spool_data = spoolman_client.getSpoolById(spool_id)
+    extras = spool_data.get("extra") or {}
+
+    spoolman_client.patchExtraTags(spool_id, extras, {
       "tag": json.dumps(myuuid),
     })
     return render_template('write_tag.html', myuuid=myuuid)
