@@ -1,6 +1,6 @@
 image:
   pullPolicy: IfNotPresent
-  repository: ghcr.io/drndos/openspoolman
+  repository: ghcr.io/niko11111/openspoolman
 portal:
   open:
     enabled: false

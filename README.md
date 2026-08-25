@@ -1,4 +1,11 @@
 # <img alt="logo" src="static/logo.png" height="36" /> OpenSpoolMan 
+
+> **This is a fork of [drndos/openspoolman](https://github.com/drndos/openspoolman)**
+> (MIT, © 2024 Filip Bednárik), maintained by [Niko11111](https://github.com/Niko11111).
+> Changes made here are offered upstream as individual pull requests; this fork
+> exists so they are usable before they are merged. For the original project,
+> its releases and its issue tracker, go to the upstream repository.
+
 Use any filament like Bambu filaments while OpenSpoolMan automatically subtracts the estimated usage from the SpoolMan-managed spool records (see [AUTO SPEND](#auto-spend---automatic-filament-usage-based-on-slicer-estimate)). BambuLab filament is auto-tracked once it shows up in a tray; only third-party spools must be assigned manually through the UI.
 
 No need for cloud or additional hardware—NFC Tags are optional and you can rely solely on the web GUI. In SpoolMan you can generate QR-code stickers that link straight back to OpenSpoolMan so users can tap a label from their mobile device; change the base URL in SpoolMan settings to OpenSpoolMan before generating the sticker (see [SpoolMan stickers](#spoolman-stickers)).
@@ -7,9 +14,9 @@ Similar functionality to https://github.com/spuder/OpenSpool using only your pho
 
 Everything works locally without cloud access; you can use `scripts/init_bambulab.py` to fetch your `PRINTER_ID`/`PRINTER_CODE` if the printer does not expose them.
 
-Docker: https://ghcr.io/drndos/openspoolman
+Docker: https://ghcr.io/niko11111/openspoolman (upstream: https://ghcr.io/drndos/openspoolman)
 
-Helm: https://github.com/drndos/openspoolman/pkgs/container/openspoolman%2Fhelm%2Fopenspoolman
+Helm: https://github.com/Niko11111/openspoolman/pkgs/container/openspoolman%2Fhelm%2Fopenspoolman (upstream: https://github.com/drndos/openspoolman/pkgs/container/openspoolman%2Fhelm%2Fopenspoolman)
 
 ### News
 - [v0.3.0](https://github.com/drndos/openspoolman/releases/tag/v0.3.0) - 23.12.2025 — more accurate filament accounting and layer tracking, higher-fidelity print history, and better Bambu Lab / AMS integration
