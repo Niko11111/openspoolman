@@ -458,6 +458,20 @@ def on_message(client, userdata, msg):
         processMessage(data)
         FILAMENT_TRACKER.on_message(data)
       
+    # The few printer-level values a client of the AMS source needs. Kept
+    # here rather than in PRINTER_STATE, which is only filled while AUTO_SPEND
+    # is on. Reports are incremental, so a value stays until a newer one comes.
+    if "print" in data:
+      status = LAST_AMS_CONFIG.setdefault("status", {})
+      for key in ("gcode_state", "mc_percent"):
+        if key in data["print"]:
+          status[key] = data["print"][key]
+      ams_block = data["print"].get("ams")
+      if isinstance(ams_block, dict):
+        for key in ("tray_now", "tray_exist_bits"):
+          if key in ams_block:
+            status[key] = ams_block[key]
+
     # Save external spool tray data
     if "print" in data and "vt_tray" in data["print"]:
       LAST_AMS_CONFIG["vt_tray"] = data["print"]["vt_tray"]

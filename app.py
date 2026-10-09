@@ -720,3 +720,5 @@ def print_select_spool():
 # Register REST API blueprint
 from api_routes import api_bp
 app.register_blueprint(api_bp)
+from ams_source_routes import ams_source_bp
+app.register_blueprint(ams_source_bp)
