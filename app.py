@@ -888,3 +888,5 @@ app.register_blueprint(api_bp)
 # Register the settings page
 from settings_routes import settings_bp
 app.register_blueprint(settings_bp)
+from ams_source_routes import ams_source_bp
+app.register_blueprint(ams_source_bp)
